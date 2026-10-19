@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-10-19
 
 First release, with the same API coverage as the Node.js and PHP SDKs 0.4.0.
 
