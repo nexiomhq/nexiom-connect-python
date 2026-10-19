@@ -1,0 +1,91 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and build
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python3 .github/scripts/verify_release_version.py
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.10"
+          enable-cache: false
+
+      - run: uv sync --locked
+      - run: uv run ruff format --check
+      - run: uv run ruff check
+      - run: uv run mypy
+      - run: uv run pytest
+
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Protect this environment with required reviewers: a maintainer approves every release
+    # before it reaches PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/nexiom-connect/${{ github.event.release.tag_name }}
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      # Trusted publishing: OIDC authenticates the upload and signs attestations. No API token.
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+
+  release-assets:
+    name: Attach files to the GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload the wheel and source distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
